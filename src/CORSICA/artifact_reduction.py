@@ -2,16 +2,19 @@ import numpy as np
 import warnings
 from pathlib import Path
 import csv
+import pandas as pd
 
 import matplotlib 
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import mne
 mne.set_log_level('WARNING') #Ausgaben von MNE Python minimieren
 from scipy import signal
 from mne.preprocessing import ICA
+from datetime import datetime
 
 
-def ci_artifact_reduction(raw, snr_threshold, fs_eeg, attended_audio, distraction_audio=None, peak_win_negative = 0.005, peak_win_pos = 0.012, plot=False, metadata=False):
+def ci_artifact_reduction(raw, snr_threshold, fs_eeg, attended_audio, distraction_audio=None, peak_win_negative = 0.005, peak_win_pos = 0.012, output_dir= "output", plot=False, metadata=False):
     """
         Reduce CI Artifacts from EEG data
 
@@ -30,6 +33,8 @@ def ci_artifact_reduction(raw, snr_threshold, fs_eeg, attended_audio, distractio
             Negative time lag window (in seconds), default 0.005s
         - peak_win_positive : float
             Positive time lag window (in seconds), default 0.012s
+        - output_dir : str
+            Directory where output files will be saved
         - plot : bool
             If True, enables visualization of results, default is False
 
@@ -42,6 +47,10 @@ def ci_artifact_reduction(raw, snr_threshold, fs_eeg, attended_audio, distractio
         # DONE Check obs ein single speaker oder conmpeting speaker ist, wenn competing ist audio attended + competing 
         # DONE Kommentare unterdrücken?
         # - plot 
+    #prepare output directory
+    if plot == True or metadata == True:
+        output_dir = Path(output_dir) / "output_corsica"
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     #prepare audio_sum
     #set competing to true if necessary and adjust audio_sum    
@@ -93,6 +102,10 @@ def ci_artifact_reduction(raw, snr_threshold, fs_eeg, attended_audio, distractio
         # reject components based on snr value
         if snr > snr_threshold: #wichtig
             exclude.append(ic)
+
+        #if plot is true save plot 
+        if plot == True:
+            plotting(lags,corr,fs_eeg, snr, output_dir)
     
     
     # reconstruct EEG based on remaining ICs
@@ -102,61 +115,10 @@ def ci_artifact_reduction(raw, snr_threshold, fs_eeg, attended_audio, distractio
 
     cleaned_eeg = raw_cleaned.get_data()
 
-    #if plot is true show or save plot #TODO
-    if plot == True:
-         plot()
+    
     
     if metadata == True: 
-
-         #values to save
-         number_of_ics= ics.n_components_
-         print(f"Number of ICs: {number_of_ics}")
-         number_excluded_ics = len(exclude) 
-         print(f"Excluded ICs: {number_excluded_ics} with indices {exclude}")
-         percentage_remaining_ics = (number_of_ics - number_excluded_ics) / number_of_ics * 100
-         print (f"Percentage of remaining ICs: {percentage_remaining_ics:.2f}% ")
-         excluded_snr_values = [round(float(snrs[ic]), 3) for ic in exclude]
-         print(f"Snr values of excluded ICs: {excluded_snr_values}")
-         number_used_ics = number_of_ics - number_excluded_ics
-         used_snr_indizes = [i for i in range(number_of_ics) if i not in exclude]
-         print(f"Used ICs: {number_used_ics} with indices {used_snr_indizes}")
-         used_snr_values = [round(float(snrs[i]),3) for i in range(number_of_ics) if i not in exclude]
-         print(f"Snr values of used ICs: {used_snr_values}")
-         max_snr= max(snrs)
-         print(f"Highest SNR values of all ICs: {max_snr:.3f} dB")
-         mean_peak_in_seconds_after_stimulus_s = np.mean(peak_in_seconds_after_stimulus_s) #NOTE array ausgeben lassen
-         print(f"Peak occurs on average at {mean_peak_in_seconds_after_stimulus_s:.3f} seconds after stimulus onset")
-         mean_snr = np.mean(snrs)
-         print(f"Mean SNR of all ICs: {mean_snr:.3f} dB")
-         mean_snr_cleaned = np.mean([snrs[i] for i in range(number_of_ics) if i not in exclude])
-         print(f"Mean SNR of remaining ICs: {mean_snr_cleaned:.3f} dB") #NOTE nicht so viel aussagekraft weil es ja das snr von dem signal ist was als artefakt gilt
-         mean_snr_excluded = np.mean(excluded_snr_values) if excluded_snr_values else float('nan')
-         print(f"Mean SNR of excluded ICs: {mean_snr_excluded:.3f} dB")
-
-         current_dir = Path(__file__).parent
-         file_path = current_dir / "eeg_metrics.csv"
-
-         data = [
-         ["Number of independent components", number_of_ics, "count"],
-         ["Number of excluded ICs", number_excluded_ics, "count"],
-         ["Indices of excluded ICs", exclude, "count"],
-         ["Percentage of remaining ICs", round(percentage_remaining_ics, 2), "%"],
-         ["Excluded ICs SNR values", ", ".join(map(str, excluded_snr_values)), "dB"],
-         ["Number of used ICs", number_used_ics, "count"],
-         ["Indices of used ICs", used_snr_indizes, "count"],
-         ["Used ICs SNR values", ", ".join(map(str, used_snr_values)), "dB"],
-         ["Highest SNR", round(max_snr, 3), "dB"],
-         ["Mean SNR", round(mean_snr, 3), "dB"],
-         ["Mean peak time in seconds after stimulus onset", round(mean_peak_in_seconds_after_stimulus_s, 3), "s"],
-         ["Mean SNR of remaining ICs", round(mean_snr_cleaned, 3), "dB"],
-         ["Mean SNR of excluded ICs", round(mean_snr_excluded, 3), "dB"]
-         ]
- 
-         with open(file_path, mode='w', newline='') as f:
-             writer = csv.writer(f)
-             writer.writerow(["metric", "value", "unit"])
-             writer.writerows(data)
-            
+        calculate_metadata(ics, exclude, snrs, peak_in_seconds_after_stimulus_s, output_dir)
 
     print ('ganze Methode durchgelaufen')
 
@@ -190,7 +152,7 @@ def peak_snr(correlation, fs, peak_win_negative, peak_win_pos):
     peak_value_idx= np.argmax(segment) + start
 
     signal_power = peak_value ** 2
-    cross_corr_no_peak = np.delete(correlation, peak_value_idx) #NOTE: man löscht nur eine indez aber ist der Peak nicht auf einer breiteren Spanne 
+    cross_corr_no_peak = np.delete(correlation, peak_value_idx) 
 
     noise_power = np.mean(cross_corr_no_peak ** 2)
     snr = 10 * np.log10(signal_power / noise_power)
@@ -208,5 +170,99 @@ def check_dimensions(audio, eeg_data):
     else:
         print(f"Check successful: Arrays have the same length. Audio: {len(audio)}, EEG: {eeg_data.shape[1]}")
 
-def plot():
-     return 
+def plotting(lags,corr,fs_eeg, snr, output_dir):
+    
+    #create plot
+    fig, ax = plt.subplots(1, 1, figsize=(6, 4.5))
+
+    # 1. Convert lags to ms (Assuming 'lags' is in seconds, * 1000)
+    lags_ms = (lags / 1000) * 1000 
+
+    # 2. Main cross-correlation plot
+    ax.plot(lags_ms, corr, color='dimgrey', linewidth=1.5)
+
+    # 3. Mark the search window (-5ms to 15ms) in grey
+    ax.axvspan(-5, 15, color='grey', alpha=0.3, label='Search Window')
+
+    # 4. Highlight Peak within the window
+    # Ensure fs_eeg and corr are available in your local scope
+    n_samples = corr.shape[0]
+    start_idx = n_samples // 2 - int(0.005 * fs_eeg)
+    stop_idx = n_samples // 2 + int(0.015 * fs_eeg)
+    central_indices = np.arange(start_idx, stop_idx)
+
+    peak_val = np.max(corr[central_indices])
+    peak_idx = np.argmax(corr[central_indices]) + start_idx
+
+    ax.plot(lags_ms[peak_idx], peak_val, marker='x', color='black', markersize=8, mew=2)
+
+    # 5. Aesthetics: Limits, Labels, and Spines
+    ax.set_xlim([-300, 300])
+    ax.set_xlabel('Delay (ms)', fontsize=18)
+    ax.set_ylabel('Cross-correlation', fontsize=18)
+    ax.set_title("Correlation-based artifact rejection", fontsize=16, pad=15, weight='bold')
+
+    ax.text(-200, 0.5, 'Search\nwindow', fontsize = 18)
+    ax.text(100, 0.5, f'Peak\nSNR={snr:.1f}dB', fontsize=18)
+
+    # Remove upper and right spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    ax.tick_params(axis='both', which='major', labelsize=14)
+
+    plt.tight_layout()
+    
+    plt.savefig(output_dir / f"test_plotting.svg")
+    #fig.savefig(os.path.join(output_path, 'TRF_corr_approach_search', f'method_1_calculation_{str(sub_id)}_{str(wav_name) + str(ic)}_{str(snr)}.svg')) #TODO
+    plt.show()
+
+    return 
+
+def calculate_metadata(ics, exclude, snrs, peak_in_seconds_after_stimulus_s, output_dir):
+    #values to save
+    number_of_ics= ics.n_components_
+    print(f"Number of ICs: {number_of_ics}")
+    number_excluded_ics = len(exclude) 
+    print(f"Excluded ICs: {number_excluded_ics} with indices {exclude}")
+    percentage_remaining_ics = (number_of_ics - number_excluded_ics) / number_of_ics * 100
+    print (f"Percentage of remaining ICs: {percentage_remaining_ics:.2f}% ")
+    excluded_snr_values = [round(float(snrs[ic]), 3) for ic in exclude]
+    print(f"Snr values of excluded ICs: {excluded_snr_values}")
+    number_used_ics = number_of_ics - number_excluded_ics
+    used_snr_indizes = [i for i in range(number_of_ics) if i not in exclude]
+    print(f"Used ICs: {number_used_ics} with indices {used_snr_indizes}")
+    used_snr_values = [round(float(snrs[i]),3) for i in range(number_of_ics) if i not in exclude]
+    print(f"Snr values of used ICs: {used_snr_values}")
+    max_snr= max(snrs)
+    print(f"Highest SNR values of all ICs: {max_snr:.3f} dB")
+    mean_peak_in_seconds_after_stimulus_s = np.mean(peak_in_seconds_after_stimulus_s) #NOTE array ausgeben lassen
+    print(f"Peak occurs on average at {mean_peak_in_seconds_after_stimulus_s:.3f} seconds after stimulus onset")
+    mean_snr = np.mean(snrs)
+    print(f"Mean SNR of all ICs: {mean_snr:.3f} dB")
+    mean_snr_cleaned = np.mean([snrs[i] for i in range(number_of_ics) if i not in exclude])
+    print(f"Mean SNR of remaining ICs: {mean_snr_cleaned:.3f} dB") #NOTE nicht so viel aussagekraft weil es ja das snr von dem signal ist was als artefakt gilt
+    mean_snr_excluded = np.mean(excluded_snr_values) if excluded_snr_values else float('nan')
+    print(f"Mean SNR of excluded ICs: {mean_snr_excluded:.3f} dB")
+
+    file_path = output_dir / "eeg_metrics.csv"
+
+    data = {
+        "Number of independent components": number_of_ics,
+        "Number of excluded ICs": number_excluded_ics,
+        "Indices of excluded ICs": exclude,
+        "Percentage of remaining ICs": round(percentage_remaining_ics, 2),
+        "Excluded ICs SNR values": excluded_snr_values,
+        "Number of used ICs": number_used_ics,
+        "Indices of used ICs": used_snr_indizes,
+        "Used ICs SNR values": used_snr_values,
+        "Highest SNR": round(max_snr, 3),
+        "Mean SNR": round(mean_snr, 3),
+        "Mean peak time in seconds after stimulus onset": round(mean_peak_in_seconds_after_stimulus_s, 3),
+        "Mean SNR of remaining ICs": round(mean_snr_cleaned, 3),
+        "Mean SNR of excluded ICs": round(mean_snr_excluded, 3),
+    }
+
+    df = pd.DataFrame([data])
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    df.to_csv(output_dir / f"eeg_metrics_{timestamp}.csv", index=False)
