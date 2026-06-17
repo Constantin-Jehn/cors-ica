@@ -1,22 +1,21 @@
-import math
-
 import numpy as np
 import warnings
+import math
 from pathlib import Path
-import csv
+
 import pandas as pd
 
-import matplotlib 
+import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+
 import mne
-#mne.set_log_level('WARNING') #Ausgaben von MNE Python minimieren
-from scipy import signal
 from mne.preprocessing import ICA
-#from datetime import datetime
+
+from scipy import signal
 
 
-def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attended_audio, distraction_audio=None, snr_threshold = 9.5, peak_win_negative = 0.005, peak_win_pos = 0.012, plot=False, metadata=False):
+def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attended_audio, distraction_audio=None, snr_threshold = 9.5, start_search_window = -0.005, end_search_window = 0.012, plot=False, metadata=False):
     """
     Reduce CI Artifacts of EEG data
 
@@ -37,10 +36,10 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
         1D NumPy array containing the signal of the distracting (unattended) audio stream if available, default is None (for single speaker scenarios)
     - snr_threshold: float 
         Maximum SNR value required for an independent component to not be extracted from the dataset, default 9.5
-    - peak_win_negative : float
-        Duration of the search window before zero lag (in seconds), default 0.005s
-    - peak_win_positive : float
-        Duration of the search window after zero lag (in seconds), default 0.012s
+    - start_search_window : float
+        Start point of the search window relative to zero lag (in seconds), default -0.005s
+    - end_search_window : float
+        End point of the search window relative to zero lag (in seconds), default 0.012s
     - plot : bool
         If True, enables saving of plots, default is False
     - metadata : bool
@@ -68,8 +67,8 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
 
     #prepare eeg
     # load eeg
-    rank = np.linalg.matrix_rank(raw.get_data())
-    ics = ICA(n_components=rank, method='infomax', random_state=97)
+    #rank = np.linalg.matrix_rank(raw.get_data())
+    ics = ICA(n_components, method='infomax', random_state=97)
     ics.fit(raw)
     ica_sources = ics.get_sources(raw)
     ica_data, ica_times = ica_sources.get_data(return_times=True) 
@@ -98,7 +97,7 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
         corr /= np.max(corr)
         lags = signal.correlation_lags(len(ica_data[ic, :]), len(audio_sum))
         lags_s.append(lags)
-        snr, central_lags, peak_value_idx, peak_in_seconds_after_stimulus = peak_snr(corr, fs_eeg, peak_win_negative, peak_win_pos)
+        snr, central_lags, peak_value_idx, peak_in_seconds_after_stimulus = peak_snr(corr, fs_eeg, start_search_window, end_search_window)
         snr_s.append(snr)
         peak_in_seconds_after_stimulus_s.append(peak_in_seconds_after_stimulus)
 
@@ -108,7 +107,7 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
 
     #if plot is true save plot 
     if plot == True:
-        plotting(lags_s,corr_s,fs_eeg, snr_s, output_dir, subject_id, trial_id, peak_win_negative, peak_win_pos)
+        plotting(lags_s, corr_s, fs_eeg, snr_s, output_dir, subject_id, trial_id, start_search_window, end_search_window)
 
     # reconstruct EEG based on remaining ICs
     ics.exclude = exclude
@@ -124,21 +123,21 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
 
     return cleaned_eeg
 
-def peak_snr(correlation, fs, peak_win_negative, peak_win_pos): 
+def peak_snr(correlation, fs, start_search_window, end_search_window): 
     """ 
     Calculates the signal-to-noise ratio (SNR) of the highest peak
-    in relevant time lags (peak_win_negative, peak_win_pos())
+    in relevant time lags (start_search_window, end_search_window)
 
     Input:
     - correlation : ndarray
         Cross-correlation array
     - fs : int
         Sampling frequency in Hz
-    - peak_win_negative : float
-        Duration of the search window before zero lag (in seconds)
-    - peak_win_positive : float
-        Duration of the search window after zero lag (in seconds)
-   
+    - start_search_window : float
+        Start point of the search window relative to zero lag (in seconds)
+    - end_search_window : float
+        End point of the search window relative to zero lag (in seconds)
+
     Output:
     - snr : float
         Signal-to-noise ratio of the largest peak, in dB
@@ -154,8 +153,8 @@ def peak_snr(correlation, fs, peak_win_negative, peak_win_pos):
     n = len(correlation)
     center = n//2
 
-    start = center - int(peak_win_negative * fs)
-    stop = center+ int(peak_win_pos * fs)
+    start = center + int(start_search_window * fs) 
+    stop = center + int(end_search_window * fs)
 
     segment = correlation[start:stop]
     central_lags= np.arange(start, stop)
@@ -196,7 +195,7 @@ def check_dimensions(audio, eeg_data):
     else:
         print(f"Check successful: Arrays have the same length. Audio: {len(audio)}, EEG: {eeg_data.shape[1]}")
 
-def plotting(lags_s,corr_s,fs_eeg, snr_s, output_dir, subject_id, trial_id, peak_win_negative, peak_win_pos):
+def plotting(lags_s, corr_s, fs_eeg, snr_s, output_dir, subject_id, trial_id, start_search_window, end_search_window):
     """
     Creates and saves correlation plots for all independent components (ICs)
     used in CI artifact rejection analysis.
@@ -223,10 +222,10 @@ def plotting(lags_s,corr_s,fs_eeg, snr_s, output_dir, subject_id, trial_id, peak
         Identifier of the subject
     - trial_id : str or int
         Identifier of the trial
-    - peak_win_negative : float
-        Duration of the search window before zero lag (in seconds)
-    - peak_win_positive : float
-        Duration of the search window after zero lag (in seconds)
+    - start_search_window : float
+        Start point of the search window relative to zero lag (in seconds)
+    - end_search_window : float
+        End point of the search window relative to zero lag (in seconds)
 
     Output:
     - None
@@ -253,15 +252,15 @@ def plotting(lags_s,corr_s,fs_eeg, snr_s, output_dir, subject_id, trial_id, peak
         # cross-correlation plot
         ax.plot(lags_ms, corr, color='dimgrey', linewidth=1.5)
 
-        # Mark the search window (-5ms to 15ms) in grey
-        ax.axvspan(-peak_win_negative * 1000, peak_win_pos * 1000, color='grey', alpha=0.3, label='Search Window')
+        # Mark the search window (-5ms to 15ms) in grey #TODO nachbessern
+        ax.axvspan(start_search_window * fs_eeg, end_search_window * fs_eeg, color='grey', alpha=0.3, label='Search Window')
 
         
         # Highlight Peak within the window
         # Ensure fs_eeg and corr are available in your local scope
         n_samples = corr.shape[0]
-        start_idx = n_samples // 2 - int(0.005 * fs_eeg)
-        stop_idx = n_samples // 2 + int(0.015 * fs_eeg)
+        start_idx = n_samples // 2 + int(start_search_window * fs_eeg)
+        stop_idx = n_samples // 2 + int(end_search_window * fs_eeg)
         central_indices = np.arange(start_idx, stop_idx)
 
         peak_val = np.max(corr[central_indices])
@@ -294,7 +293,6 @@ def plotting(lags_s,corr_s,fs_eeg, snr_s, output_dir, subject_id, trial_id, peak
     for j in range(n, len(axes)):
         fig.delaxes(axes[j])
 
-    fig.suptitle("Correlation-based CI artifact reduction – cors-ica", fontsize=18, y=0.98)
     fig.suptitle(f"Cross-Correlation plots of all Independent Components\n"
              f"Subject: {subject_id} | Trial: {trial_id}", 
              fontsize=16, fontweight='bold', y=0.98)

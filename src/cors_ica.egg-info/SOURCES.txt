@@ -6,5 +6,7 @@ src/CORSICA/artifact_reduction.py
 src/cors_ica.egg-info/PKG-INFO
 src/cors_ica.egg-info/SOURCES.txt
 src/cors_ica.egg-info/dependency_links.txt
+src/cors_ica.egg-info/requires.txt
 src/cors_ica.egg-info/top_level.txt
 tests/test.py
+tests/tests_2.py

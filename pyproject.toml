@@ -3,13 +3,26 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ci-artifact-reduction" #TODO name ändern
-version = "0.0.11"
+name = "cors-ica"
+version = "0.1.3"
 description = "Package to reduce artifacts in eeg from cochlear implant stimuli"
 readme = {file = "README.md", content-type = "text/markdown"}
+
+license = {text = "MIT"} 
+
 authors = [
-  { name = "Constantin Jehn", email = "constantin.jehn@fau.de" }
+  { name = "Constantin Jehn", email = "constantin.jehn@fau.de" },
+  { name = "Leonie Richter", email = "leonie.f.richter@fau.de" }
 ]
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "matplotlib",
+    "mne"
+]
+
 
 requires-python = ">=3.12"
 
@@ -22,7 +35,8 @@ keywords = [
 
 [project.urls]
 Repository = "https://github.com/LeonieRichterFAU/cors-ica"
-Paper = "https://arxiv.org/abs/2501.12345"
+Dataset = "https://zenodo.org/records/17952844"
+Paper = "https://doi.org/10.1088/1741-2552/addb7b"
 
 
 
