@@ -9,23 +9,24 @@ ci_artifact_reduction(
     fs_eeg,
     attended_audio,
     distraction_audio=None,
-    snr_threshold=9.5,
+    snr_threshold=27,
     start_search_window=-0.005,
     end_search_window=0.012,
+    n_components=None,
     plot=False,
     metadata=False
 )
 ```
 
-Filtering CI Artifacts based on Correlation of Indepndent Components and audio 
+Filtering CI Artifacts based on Correlation of Independent Components and audio 
 
 ### Method Overview
 
 1. EEG data is decomposed into independent components using ICA.
 2. Each component is cross-correlated with the audio stimulus.
-3. The peak correlation within an window (can be adjusted) is identified.
+3. The peak correlation within a search window is identified.
 4. The SNR value is computed from the correlation peak.
-5. Components with high stimulus correlation (high SNR) are considered CI-related artifacts and are removed.
+5. Components with an SNR value above the defined threshold are classified as CI artifact-related components and are removed.
 6. The cleaned EEG signal is reconstructed from the remaining components.
 
 --- 
@@ -54,13 +55,16 @@ Filtering CI Artifacts based on Correlation of Indepndent Components and audio
 &nbsp;&nbsp;&nbsp;&nbsp;1D array containing the distracting audio signal, default = None
 
 **snr_threshold** : float  
-&nbsp;&nbsp;&nbsp;&nbsp;Independent components with SNR values above this threshold are removed, default = 9.5
+&nbsp;&nbsp;&nbsp;&nbsp;Independent components with SNR values above this threshold are removed, default = 27
 
 **start_search_window** : float, optional  
 &nbsp;&nbsp;&nbsp;&nbsp;Start point of the search window relative to zero lag (in seconds), default = -0.005
 
 **end_search_window** : float, optional  
 &nbsp;&nbsp;&nbsp;&nbsp;End point of the search window relative to zero lag (in seconds), default = 0.012
+
+**n_components** : int | float | None, optional 
+&nbsp;&nbsp;&nbsp;&nbsp;Number of components passed to the ICA algorithm. If None, 0.999999 will be used, default = None.
 
 **plot** : bool, optional  
 &nbsp;&nbsp;&nbsp;&nbsp;If True, saves cross-correlation plots of all independent components, default = False
@@ -73,7 +77,13 @@ Filtering CI Artifacts based on Correlation of Indepndent Components and audio
 ### Returns
 
 **cleaned_eeg** : np.ndarray  
-&nbsp;&nbsp;&nbsp;&nbsp;EEG data after CI artifact removal.
+&nbsp;&nbsp;&nbsp;&nbsp;EEG data after CI artifact removal
+
+**raw_cleaned** : mne.io.Raw  
+&nbsp;&nbsp;&nbsp;&nbsp;Cleaned EEG data as an MNE Raw object
+
+**metadata_out** : dict
+&nbsp;&nbsp;&nbsp;&nbsp;Dictionary containing summary information about the artifact reduction, including all SNR values, excluded ICs, used ICs, peak times, and threshold settings
 
 ---
 
@@ -116,7 +126,7 @@ Install the latest release using pip:
 pip install \
   -i https://test.pypi.org/simple/ \
   --extra-index-url https://pypi.org/simple \
-  cors-ica==0.1.2
+  cors-ica
 ```
 
 <!-- pip install cors-ica -->
@@ -156,12 +166,14 @@ fs_eeg = 1000
 n_samples = raw.get_data().shape[1]
 
 # Example audio signals (must be time-aligned with EEG)
-attended_audio = np.random.randn(n_samples)
-distraction_audio = np.random.randn(n_samples)
+attended_audio = raw.get_data()[31, :]
+distraction_audio = raw.get_data()[32, :]
+
+           
 
 # Run CI artifact reduction
 
-cleaned_eeg = ci_artifact_reduction(
+cleaned_eeg, raw_cleaned, metadata_out  = ci_artifact_reduction(
     raw=raw,
     subject_id="301",
     trial_id="123",
@@ -172,11 +184,14 @@ cleaned_eeg = ci_artifact_reduction(
     snr_threshold=9.5,
     start_search_window=-0.005,
     end_search_window=0.012,
+    raw_cleaned, metadata_out
     plot=True,
     metadata=True
 )
 
 print("Cleaned EEG shape:", cleaned_eeg.shape)
+print("Excluded ICs:", metadata_out["Indices of excluded ICs"]) 
+print("Used ICs:", metadata_out["Indices of used ICs"])
 ```
 
 

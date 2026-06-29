@@ -1,3 +1,12 @@
+"""
+CI artifact reduction package.
+
+This module removes cochlear implant artifacts from EEG data using ICA.
+Independent components are evaluated by cross-correlating them with the audio signal.
+Components with high peak SNR around zero lag are classified as artifact-related
+and removed from the EEG signal.
+"""
+
 import numpy as np
 import warnings
 import math
@@ -15,7 +24,7 @@ from mne.preprocessing import ICA
 from scipy import signal
 
 
-def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attended_audio, distraction_audio=None, snr_threshold = 9.5, start_search_window = -0.005, end_search_window = 0.012, plot=False, metadata=False):
+def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attended_audio, distraction_audio=None, snr_threshold = 27, start_search_window = -0.005, end_search_window = 0.012, n_components= None, plot=False, metadata=False):
     """
     Reduce CI Artifacts of EEG data
 
@@ -35,11 +44,13 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
     - distraction_audio : np.ndarray
         1D NumPy array containing the signal of the distracting (unattended) audio stream if available, default is None (for single speaker scenarios)
     - snr_threshold: float 
-        Maximum SNR value required for an independent component to not be extracted from the dataset, default 9.5
+        Maximum SNR value required for an independent component to not be extracted from the dataset, default 27
     - start_search_window : float
         Start point of the search window relative to zero lag (in seconds), default -0.005s
     - end_search_window : float
         End point of the search window relative to zero lag (in seconds), default 0.012s
+    - n_components : int | float | None
+        Number of principal components that are passed to the ICA algorithm during fitting 
     - plot : bool
         If True, enables saving of plots, default is False
     - metadata : bool
@@ -48,6 +59,12 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
     Returns:
     - cleaned_eeg : np.ndarray
         CI-Artifact-reduced EEG data with shape (n_channels, n_samples)
+    - raw_cleaned : mne.io.Raw
+        Raw cleaned EEG Data
+    - metadata_out : dict
+        Dictionary containing summary information about the artifact reduction,
+        including excluded ICs, used ICs, SNR values, peak latencies, and threshold settings
+    -
     """
 
     #Error if no output path
@@ -65,9 +82,7 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
     if isinstance(distraction_audio, np.ndarray):
             audio_sum = attended_audio + distraction_audio
 
-    #prepare eeg
-    # load eeg
-    #rank = np.linalg.matrix_rank(raw.get_data())
+    # Decompose EEG data into independent components using ICA
     ics = ICA(n_components, method='infomax', random_state=97)
     ics.fit(raw)
     ica_sources = ics.get_sources(raw)
@@ -85,7 +100,7 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
             UserWarning
     )
 
-    #iterate over all ic
+    # Iterate over all independent components
     exclude = []
     snr_s= []
     lags_s = []
@@ -101,7 +116,7 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
         snr_s.append(snr)
         peak_in_seconds_after_stimulus_s.append(peak_in_seconds_after_stimulus)
 
-        # reject components based on snr value
+        # Mark IC as artifact-related if the peak SNR exceeds the defined threshold
         if snr > snr_threshold: 
             exclude.append(ic)
 
@@ -116,12 +131,12 @@ def ci_artifact_reduction(raw, subject_id, trial_id, output_dir,  fs_eeg, attend
 
     cleaned_eeg = raw_cleaned.get_data()
     
-    if metadata == True: 
-        calculate_metadata(ics, exclude, snr_s, peak_in_seconds_after_stimulus_s, output_dir, subject_id, trial_id)
+    metadata_out =[]
+    metadata_out = calculate_metadata(ics, exclude, snr_s, peak_in_seconds_after_stimulus_s, output_dir, subject_id, trial_id, snr_threshold, start_search_window, end_search_window, metadata)
 
     #print ('ganze Methode durchgelaufen')
 
-    return cleaned_eeg
+    return cleaned_eeg, raw_cleaned, metadata_out
 
 def peak_snr(correlation, fs, start_search_window, end_search_window): 
     """ 
@@ -182,7 +197,7 @@ def check_dimensions(audio, eeg_data):
     - audio : np.ndarray
         One-dimensional audio signal
     - eeg_data : np.ndarray
-        EEG data array
+        EEG data array with shape (n_channels, n_samples)
 
     Raises:
     ValueError
@@ -247,7 +262,7 @@ def plotting(lags_s, corr_s, fs_eeg, snr_s, output_dir, subject_id, trial_id, st
         snr = snr_s[i]
 
         # 1. Convert lags to ms (Assuming 'lags' is in seconds, * 1000)
-        lags_ms = (lags / 1000) * 1000 #NOTE wieso macht man hier geteilt durch und mal 1000
+        lags_ms = (lags / fs_eeg) * 1000
 
         # cross-correlation plot
         ax.plot(lags_ms, corr, color='dimgrey', linewidth=1.5)
@@ -306,7 +321,7 @@ def plotting(lags_s, corr_s, fs_eeg, snr_s, output_dir, subject_id, trial_id, st
 
     return 
 
-def calculate_metadata(ics, exclude, snr_s, peak_in_seconds_after_stimulus_s, output_dir, subject_id, trial_id):
+def calculate_metadata(ics, exclude, snr_s, peak_in_seconds_after_stimulus_s, output_dir, subject_id, trial_id, snr_threshold, start_search_window, end_search_window, metadata):
 
     """
     Calculates summary metrics of the CI artifact reduction procedure and
@@ -327,10 +342,19 @@ def calculate_metadata(ics, exclude, snr_s, peak_in_seconds_after_stimulus_s, ou
         Subject identifier
     - trial_id : str or int
         Trial identifier
+    - snr_threshold: float 
+        Maximum SNR value required for an independent component to not be extracted from the dataset
+    - start_search_window : float
+        Start point of the search window relative to zero lag (in seconds)
+    - end_search_window : float
+        End point of the search window relative to zero lag (in seconds)
+    - metadata : bool
+        If True, enables saving of metadata, default is False
 
     Output:
-    - None
-        Results are saved to a CSV file. No direct return value.
+    - data : dict
+        Dictionary containing all calculated metadata values.
+        If metadata=True, the same information is also saved to a CSV file.
 
     """
     #calculate values
@@ -341,16 +365,23 @@ def calculate_metadata(ics, exclude, snr_s, peak_in_seconds_after_stimulus_s, ou
     number_used_ics = number_of_ics - number_excluded_ics
     used_snr_indizes = [i for i in range(number_of_ics) if i not in exclude]
     used_snr_values = [round(float(snr_s[i]),3) for i in range(number_of_ics) if i not in exclude]
+    all_snr_values = [round(float(snr_s[i]),3) for i in range(number_of_ics)]
     max_snr= max(snr_s)
     excluded_peak_times_in_seconds_after_stimulus = [peak_in_seconds_after_stimulus_s[i] for i in exclude]
     mean_peak_in_seconds_after_stimulus_s = np.mean(excluded_peak_times_in_seconds_after_stimulus)
     mean_snr = np.mean(snr_s)
     mean_snr_cleaned = np.mean([snr_s[i] for i in range(number_of_ics) if i not in exclude])
     mean_snr_excluded = np.mean(excluded_snr_values) if excluded_snr_values else float('nan')
+    start_search_window_in_ms = start_search_window * 1000
+    end_search_window_in_ms = end_search_window * 1000
 
     data = {
         "Trial ID": trial_id,
+        "SNR Value[dB]" : snr_threshold,
+        "Start Search Window [ms]" : start_search_window_in_ms, 
+        "End Search Window[ms]" : end_search_window_in_ms,
         "Number of independent components": number_of_ics,
+        "All SNR values" : all_snr_values,
         "Number of excluded ICs": number_excluded_ics,
         "Indices of excluded ICs": exclude,
         "Percentage of remaining ICs [%]": round(percentage_remaining_ics, 2),
@@ -367,53 +398,56 @@ def calculate_metadata(ics, exclude, snr_s, peak_in_seconds_after_stimulus_s, ou
         "Mean SNR of excluded ICs [dB]": round(mean_snr_excluded, 3),
     }
 
+    if metadata is True: 
+        
+        df = pd.DataFrame([data])
 
-    df = pd.DataFrame([data])
+        # filename per subject
+        output_dir = Path(output_dir)
+        csv_file = output_dir / f"{subject_id}_corsica_eeg_metrics.csv"
 
-    # filename per subject
-    output_dir = Path(output_dir)
-    csv_file = output_dir / f"{subject_id}_corsica_eeg_metrics.csv"
+        # check if file exists
+        file_exists = csv_file.exists()
 
-    # check if file exists
-    file_exists = csv_file.exists()
+        if csv_file.exists():
+            df_old = pd.read_csv(csv_file)
 
-    if csv_file.exists():
-        df_old = pd.read_csv(csv_file)
+            #check if trial id already exists
+            if df_old["Trial ID"].eq(trial_id).any():
+                warnings.warn(
+                    f"Subject {subject_id} with Trial {trial_id} already exists. "
+                    "Existing entry will be overwritten.",
+                    UserWarning
+                )
+                #removes old entry if trial id already exists    
+                df_old = df_old[df_old["Trial ID"].astype(str) != str(trial_id)]
 
-        #check if trial id already exists
-        if df_old["Trial ID"].eq(trial_id).any():
+
+            df_final = pd.concat([df_old, df], ignore_index=True)
+
+        else:
+            df_final = df
+
+        # Sorting
+        # Interpret Trial ID as numeric
+        trial_numeric = pd.to_numeric(df_final["Trial ID"], errors="coerce")
+
+        if trial_numeric.isna().any():
             warnings.warn(
-                f"Subject {subject_id} with Trial {trial_id} already exists. "
-                "Existing entry will be overwritten.",
+                "Trial ID contains non-numeric values. "
+                "Data will be appended without sorting.",
                 UserWarning
             )
-            #removes old entry if trial id already exists    
-            df_old = df_old[df_old["Trial ID"].astype(str) != str(trial_id)]
+
+            pass
+
+        else:
+            df_final["Trial ID"] = trial_numeric.astype(int)
+            df_final = df_final.sort_values(by="Trial ID").reset_index(drop=True)
 
 
-        df_final = pd.concat([df_old, df], ignore_index=True)
+        # Save
+        df_final.to_csv(csv_file, index=False)
 
-    else:
-        df_final = df
-
-    # Sorting
-    # Interpret Trial ID as numeric
-    trial_numeric = pd.to_numeric(df_final["Trial ID"], errors="coerce")
-
-    if trial_numeric.isna().any():
-        warnings.warn(
-            "Trial ID contains non-numeric values. "
-            "Data will be appended without sorting.",
-            UserWarning
-        )
-
-        pass
-
-    else:
-        df_final["Trial ID"] = trial_numeric.astype(int)
-        df_final = df_final.sort_values(by="Trial ID").reset_index(drop=True)
-
-
-    # Save
-    df_final.to_csv(csv_file, index=False)
+    return data
     
