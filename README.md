@@ -184,7 +184,7 @@ cleaned_eeg, raw_cleaned, metadata_out  = ci_artifact_reduction(
     snr_threshold=9.5,
     start_search_window=-0.005,
     end_search_window=0.012,
-    raw_cleaned, metadata_out
+    n_components = None,
     plot=True,
     metadata=True
 )
