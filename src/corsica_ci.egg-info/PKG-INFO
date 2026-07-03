@@ -1,3 +1,23 @@
+Metadata-Version: 2.4
+Name: corsica-ci
+Version: 0.0.2
+Summary: Package to reduce artifacts in eeg from cochlear implant stimuli
+Author-email: Constantin Jehn <constantin.jehn@fau.de>, Leonie Richter <leonie.f.richter@fau.de>
+License: MIT
+Project-URL: Repository, https://github.com/LeonieRichterFAU/cors-ica
+Project-URL: Dataset, https://zenodo.org/records/17952844
+Project-URL: Paper, https://doi.org/10.1088/1741-2552/addb7b
+Keywords: eeg,ci,cochlear-implant,artifact-rejection
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: scipy
+Requires-Dist: matplotlib
+Requires-Dist: mne
+Dynamic: license-file
+
 **CI Artifact Reduction**
 
 ```python
